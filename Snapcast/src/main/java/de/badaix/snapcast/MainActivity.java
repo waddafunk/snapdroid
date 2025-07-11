@@ -30,6 +30,7 @@ import android.media.AudioRecord;
 import android.net.nsd.NsdServiceInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
 import android.text.TextUtils;
 import android.util.Log;
@@ -64,6 +65,7 @@ import de.badaix.snapcast.control.json.Stream;
 import de.badaix.snapcast.control.json.Volume;
 import de.badaix.snapcast.utils.NsdHelper;
 import de.badaix.snapcast.utils.Settings;
+import android.view.WindowManager;
 
 public class MainActivity extends AppCompatActivity implements GroupItem.GroupItemListener, RemoteControl.RemoteControlListener, SnapclientService.SnapclientListener, NsdHelper.NsdHelperListener {
 
@@ -88,6 +90,11 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
     private CoordinatorLayout coordinatorLayout;
     private Button btnConnect = null;
     private boolean batchActive = false;
+    private static final long IDLE_TIMEOUT = 30000; // 30 seconds
+    private Handler idleHandler = new Handler();
+    private Runnable idleRunnable;
+    private View blackScreenOverlay;
+    private boolean isScreenBlack = false;
 
     private final ActivityResultLauncher<String> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
@@ -171,6 +178,95 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
         setActionbarSubtitle("Host: no Snapserver found");
         serverStatus = new ServerStatus();
         askNotificationPermission();
+
+        setupBlackScreen();
+    }
+
+    private void setupBlackScreen() {
+        blackScreenOverlay = findViewById(R.id.blackScreenOverlay);
+
+        // Click anywhere to exit black screen
+        blackScreenOverlay.setOnClickListener(v -> {
+            exitBlackScreen();
+        });
+
+        // Setup idle detection
+        idleRunnable = () -> {
+            if (!isScreenBlack && remoteControl != null && remoteControl.isConnected()) {
+                enterBlackScreen();
+            }
+        };
+
+        resetIdleTimer();
+    }
+
+    private void resetIdleTimer() {
+        idleHandler.removeCallbacks(idleRunnable);
+        idleHandler.postDelayed(idleRunnable, IDLE_TIMEOUT);
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+
+        if (isScreenBlack) {
+            exitBlackScreen();
+        }
+        resetIdleTimer();
+    }
+
+    private void enterBlackScreen() {
+        isScreenBlack = true;
+
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().hide();
+        }
+
+        // Simple fade to black
+        blackScreenOverlay.setAlpha(0f);
+        blackScreenOverlay.setVisibility(View.VISIBLE);
+        blackScreenOverlay.animate()
+                .alpha(1f)
+                .setDuration(500);
+
+        // Hide status bar for full black
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    private void exitBlackScreen() {
+        isScreenBlack = false;
+
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().show();
+        }
+
+        // Fade out black screen
+        blackScreenOverlay.animate()
+                .alpha(0f)
+                .setDuration(300)
+                .withEndAction(() -> blackScreenOverlay.setVisibility(View.GONE));
+
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+
+        resetIdleTimer();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        idleHandler.removeCallbacks(idleRunnable);
+
+        // Exit black screen if app is paused
+        if (isScreenBlack) {
+            exitBlackScreen();
+        }
     }
 
     @Override
@@ -303,6 +399,7 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
     @Override
     public void onResume() {
         super.onResume();
+        resetIdleTimer();
         startRemoteControl();
     }
 
@@ -321,6 +418,7 @@ public class MainActivity extends AppCompatActivity implements GroupItem.GroupIt
 
     @Override
     public void onDestroy() {
+        idleHandler.removeCallbacks(idleRunnable);
         stopRemoteControl();
         super.onDestroy();
     }
