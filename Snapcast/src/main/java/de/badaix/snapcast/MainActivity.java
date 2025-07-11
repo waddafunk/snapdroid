@@ -65,7 +65,6 @@ import de.badaix.snapcast.control.json.Stream;
 import de.badaix.snapcast.control.json.Volume;
 import de.badaix.snapcast.utils.NsdHelper;
 import de.badaix.snapcast.utils.Settings;
-import android.view.WindowManager;
 
 public class MainActivity extends AppCompatActivity implements GroupItem.GroupItemListener, RemoteControl.RemoteControlListener, SnapclientService.SnapclientListener, NsdHelper.NsdHelperListener {
 
